@@ -1,0 +1,53 @@
+--- ypbind-mt-1.19/src/serv_list.c.orig	2005-07-02 05:24:15.000000000 -0400
++++ ypbind-mt-1.19/src/serv_list.c	2006-11-30 11:41:06.000000000 -0500
+@@ -1043,6 +1043,7 @@ int
+ test_bindings_once (int lastcheck, const char *req_domain)
+ {
+   int i;
++  int active;
+ 
+   /* Since we need the write lock later, getting the read lock here is
+      not enough. During the time, where we wait for the write lock, the
+@@ -1070,7 +1071,8 @@ test_bindings_once (int lastcheck, const
+ 		     req_domain, domain);
+ 	  continue;
+ 	}
+-
++retry:
++      active = domainlist[i].active;
+       /* We should never run into this. For debugging.  */
+       if (domainlist[i].client_handle == NULL && domainlist[i].active != -1)
+ 	{
+@@ -1153,9 +1155,14 @@ test_bindings_once (int lastcheck, const
+ 		 the write lock again. */
+ 	      pthread_rdwr_wunlock_np (&domainlock);
+ 	      pthread_mutex_lock (&search_lock);
+-	      if (!ping_all (&domainlist[i]) &&
+-		  domainlist[i].use_broadcast)
+-		do_broadcast (&domainlist[i]);
++	      /* Make sure the active has not changed while we
++	         were sleeping. If it has, just punt on this for now */
++	      if (domainlist[i].active == -1)
++	        {
++	      		if (!ping_all (&domainlist[i]) &&
++		  				domainlist[i].use_broadcast)
++						do_broadcast (&domainlist[i]);
++		    }
+ 	      pthread_mutex_unlock (&search_lock);
+ 	      pthread_rdwr_wlock_np (&domainlock);
+ 	    }
+@@ -1166,6 +1173,14 @@ test_bindings_once (int lastcheck, const
+ 	     server */
+ 	  pthread_rdwr_wunlock_np (&domainlock);
+ 	  pthread_mutex_lock (&search_lock);
++	  /* see if the active state has change while we were 
++	     sleeping. If so start again */
++	  if (active != domainlist[i].active)
++	    {
++	       pthread_mutex_unlock (&search_lock);
++	       pthread_rdwr_wlock_np (&domainlock);
++	       goto retry;
++	    }
+ 	  if (!ping_all (&domainlist[i]) && domainlist[i].use_broadcast)
+ 	    do_broadcast (&domainlist[i]);
+ 	  pthread_mutex_unlock (&search_lock);

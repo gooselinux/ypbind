@@ -1,0 +1,63 @@
+diff -up ypbind-mt-1.20.4/src/ypbind-mt.c.network ypbind-mt-1.20.4/src/ypbind-mt.c
+--- ypbind-mt-1.20.4/src/ypbind-mt.c.network	2009-10-29 11:53:00.265296485 +0100
++++ ypbind-mt-1.20.4/src/ypbind-mt.c	2009-10-29 11:53:00.269297063 +0100
+@@ -297,6 +299,25 @@ load_config (int check_syntax)
+   return 0;
+ }
+ 
++
++/* Load the configuration, exiting if there's an error */
++static void
++load_config_or_exit(void)
++{
++  if (load_config (0) != 0)
++    {
++      fputs (_("No NIS server and no -broadcast option specified.\n"),
++	     stderr);
++      fprintf (stderr,
++	       _("Add a NIS server to the %s configuration file,\n"),
++	       configfile);
++      fputs (_("or start ypbind with the -broadcast option.\n"),
++	     stderr);
++      exit (1);
++    }
++}
++
++
+ /* Create a pidfile on startup */
+ static void
+ create_pidfile (void)
+@@ -765,18 +803,22 @@ main (int argc, char **argv)
+ 	       BINDINGDIR, strerror (errno));
+       exit (1);
+     }
+-  /*
+-   * Load config if we're not using DBUS/NetworkManager, since we
+-   * assume the network is available now.  If we're using NetworkManager,
+-   * the config will be loaded when a network becomes available.
+-   */
+-  if (disable_dbus)
+-    {
+-      /* Load the configuration.  If the load fails, set up broadcast mode. */
+-      if (!use_broadcast && (load_config (0) != 0))
+-        use_broadcast = 1;
++
++  if (!use_broadcast)
++    {
++#ifdef USE_DBUS_NM
++      /* If we don't use DBUS, exit with an error if we cannot load the
++	 config. Else load the config, maybe there is a network already
++	 running. */
++      if (disable_dbus)
++	load_config_or_exit ();
++      else
++	load_config (0);
++#else
++      load_config_or_exit ();
++#endif
+     }
+-  if (use_broadcast)
++  else
+     add_server (domain, NULL, 0);
+ 
+   unlink_bindingdir ();

@@ -1,0 +1,26 @@
+diff -up ypbind-mt-1.20.4/man/ypbind.8_old ypbind-mt-1.20.4/man/ypbind.8
+--- ypbind-mt-1.20.4/man/ypbind.8_old	2008-12-03 14:13:46.000000000 +0100
++++ ypbind-mt-1.20.4/man/ypbind.8	2008-12-03 14:15:56.000000000 +0100
+@@ -14,7 +14,7 @@
+ ypbind \- NIS binding process
+ .SH "SYNOPSIS"
+ .HP 7
+-\fBypbind\fR [\-c] [\-d | \-debug] [\-verbose] [\-broadcast] [\-broken\-server] [\-ypset] [\-ypsetme] [\-no\-ping] [\-f\ \fIconfigfile\fR] [\-local\-only] [\-ping\-interval\ \fIping\-interval\fR] [\-no\-dbus]
++\fBypbind\fR [\-c] [\-d | \-debug] [\-verbose] [\-broadcast] [\-broken\-server] [\-ypset] [\-ypsetme] [\-no\-ping] [\-p \fIport\fR] [\-f\ \fIconfigfile\fR] [\-local\-only] [\-ping\-interval\ \fIping\-interval\fR] [\-no\-dbus]
+ .HP 7
+ \fBypbind\fR \-\-version
+ .SH "DESCRIPTION"
+@@ -140,6 +140,13 @@ will not check if the binding is alive. 
+ \fBypbind\fR
+ from keeping the connection unnessecarily open or causing autodials.
+ .TP 3n
++\fB\-p\fR port
++\fBypbind\fR
++will bind itself to this port.
++This makes it possible to have a router filter packets
++to the NIS ports, so that access to this service from
++hosts on the Internet can be restricted.
++.TP 3n
+ \fB\-f\fR configfile
+ \fBypbind\fR
+ will use

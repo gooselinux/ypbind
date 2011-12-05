@@ -1,0 +1,168 @@
+diff -up ypbind-mt-1.20.4/man/ypbind.8.log-binds ypbind-mt-1.20.4/man/ypbind.8
+--- ypbind-mt-1.20.4/man/ypbind.8.log-binds	2006-10-04 17:26:33.000000000 +0200
++++ ypbind-mt-1.20.4/man/ypbind.8	2008-12-03 13:59:23.000000000 +0100
+@@ -14,7 +14,7 @@
+ ypbind \- NIS binding process
+ .SH "SYNOPSIS"
+ .HP 7
+-\fBypbind\fR [\-c] [\-d | \-debug] [\-broadcast] [\-broken\-server] [\-ypset] [\-ypsetme] [\-no\-ping] [\-f\ \fIconfigfile\fR] [\-local\-only] [\-ping\-interval\ \fIping\-interval\fR] [\-no\-dbus]
++\fBypbind\fR [\-c] [\-d | \-debug] [\-verbose] [\-broadcast] [\-broken\-server] [\-ypset] [\-ypsetme] [\-no\-ping] [\-f\ \fIconfigfile\fR] [\-local\-only] [\-ping\-interval\ \fIping\-interval\fR] [\-no\-dbus]
+ .HP 7
+ \fBypbind\fR \-\-version
+ .SH "DESCRIPTION"
+@@ -122,6 +122,11 @@ in debug mode.
+ \fBypbind\fR
+ will not put itself into background, and error messages and debug output are written to standard error.
+ .TP 3n
++\fB\-verbose\fR
++Causes
++\fBypbind\fR
++to syslog(2) any and all changes in the server its bound to.
++.TP 3n
+ \fB\-broken\-server\fR
+ lets
+ \fBypbind\fR
+diff -up ypbind-mt-1.20.4/src/serv_list.c.log-binds ypbind-mt-1.20.4/src/serv_list.c
+--- ypbind-mt-1.20.4/src/serv_list.c.log-binds	2008-12-03 13:51:05.000000000 +0100
++++ ypbind-mt-1.20.4/src/serv_list.c	2008-12-03 13:51:05.000000000 +0100
+@@ -50,6 +50,8 @@
+ #include "local.h"
+ #include "pthread_np.h"
+ 
++extern int verbose_flag;
++
+ #if (defined(__sun__) || defined(sun)) && defined(__svr4__)
+ typedef uint32_t u_int32_t;
+ #endif
+@@ -80,6 +82,22 @@ struct binding
+   struct bound_server ypset;
+   CLIENT *client_handle;
+ };
++static inline char *
++bound_host(struct binding *bptr)
++{
++  struct bound_server *sptr;
++
++  if (bptr->active >= 0)
++  	sptr = &bptr->server[bptr->active];
++  else if (bptr->active == -2)
++  	sptr = &bptr->ypset;
++  else
++  	return "Unknown Host";
++
++  if (sptr->host != NULL)
++  	return(sptr->host);
++  return (inet_ntoa(sptr->addr));
++}
+ 
+ static struct binding *domainlist = NULL;
+ static int max_domains = 0;
+@@ -224,6 +242,12 @@ change_binding (const char *domain, ypbi
+ 	  pthread_rdwr_rlock_np (&domainlock);
+ 	  update_bindingfile (&domainlist[i]);
+ 	  pthread_rdwr_runlock_np (&domainlock);
++	  if (verbose_flag)
++	    {
++	      log_msg (LOG_NOTICE, "NIS server set to '%s'" 
++		" for domain '%s'",
++	        bound_host(&domainlist[i]), domainlist[i].domain);
++	    }
+ 
+ 	  return;
+ 	}
+@@ -797,6 +821,10 @@ ping_all (struct binding *list)
+       list->server[i].port = s_in.sin_port;
+       if (s_in.sin_port == 0)
+ 	{
++	  if (verbose_flag && list->active == i)
++		log_msg (LOG_NOTICE, "NIS server '%s' not repsonding "
++		    "for domain '%s'", list->server[i].host, list->domain);
++		
+ 	  if (debug_flag)
+ 	    log_msg (LOG_DEBUG, _("host '%s' doesn't answer."),
+ 		     list->server[i].host);
+@@ -1001,13 +1029,21 @@ ping_all (struct binding *list)
+ void
+ do_binding (void)
+ {
+-  int i;
++  int i, active;
+ 
+   pthread_mutex_lock (&search_lock);
+   for (i = 0; i < max_domains; ++i)
+     {
++	  if (verbose_flag)
++	     active = domainlist[i].active;
+       if (!ping_all (&domainlist[i]) && domainlist[i].use_broadcast)
+ 	do_broadcast (&domainlist[i]);
++      if (verbose_flag && 
++		domainlist[i].active >= 0 && active != domainlist[i].active) 
++	{
++		log_msg (LOG_NOTICE, "NIS server is '%s' for domain '%s'",
++		    bound_host(&domainlist[i]), domainlist[i].domain);
++    	}
+     }
+   pthread_mutex_unlock (&search_lock);
+ }
+@@ -1091,6 +1128,7 @@ retry:
+ 	  domainlist[i].active = -1;
+ 	}
+ 
++      active = domainlist[i].active;
+       if (domainlist[i].active != -1)
+ 	{
+ 	  /* The binding is in use, check if it is still valid and
+@@ -1107,6 +1145,10 @@ retry:
+ 			  YPPROC_DOMAIN, (xdrproc_t) ypbind_xdr_domainname,
+ 			  (caddr_t) &domain, (xdrproc_t) xdr_bool,
+ 			  (caddr_t) &out, time_out);
++		if (verbose_flag && status != RPC_SUCCESS)
++			log_msg (LOG_NOTICE, "NIS server '%s' not responding"
++			" for domain '%s'", bound_host(&domainlist[i]),
++			domainlist[i].domain);
+ 	    }
+ 
+ 	  /* time to search a new fastest server, but only if the current
+@@ -1196,6 +1238,12 @@ retry:
+ 	  pthread_mutex_unlock (&search_lock);
+ 	  pthread_rdwr_wlock_np (&domainlock);
+ 	}
++      if (verbose_flag && 
++          domainlist[i].active >= 0 && active != domainlist[i].active)
++	{
++	  log_msg (LOG_NOTICE, "NIS server is '%s' for domain '%s'",
++	      bound_host(&domainlist[i]), domainlist[i].domain);
++	}
+     } /* end for () all domains */
+ 
+   pthread_rdwr_wunlock_np (&domainlock);
+diff -up ypbind-mt-1.20.4/src/ypbind-mt.c.log-binds ypbind-mt-1.20.4/src/ypbind-mt.c
+--- ypbind-mt-1.20.4/src/ypbind-mt.c.log-binds	2008-12-03 13:51:05.000000000 +0100
++++ ypbind-mt-1.20.4/src/ypbind-mt.c	2008-12-03 13:51:05.000000000 +0100
+@@ -466,6 +466,7 @@ sig_handler (void *v_param  __attribute_
+ 	}
+     }
+ }
++int verbose_flag;
+ 
+ static void
+ usage (int ret)
+@@ -478,7 +479,7 @@ usage (int ret)
+     output = stdout;
+ 
+   fputs (_("Usage:\n"), output);
+-  fputs (_("\typbind [-broadcast | -ypset | -ypsetme] [-p port] [-f configfile]\n\t  [-no-ping] [-broken-server] [-local-only] [-i ping-interval] [-debug]\n"), output);
++  fputs (_("\typbind [-broadcast | -ypset | -ypsetme] [-p port] [-f configfile]\n\t  [-no-ping] [-broken-server] [-local-only] [-i ping-interval] [-debug] [-verbose]\n"), output);
+ #ifdef USE_DBUS_NM
+   fputs (_("\t  [-no-dbus]\n"), output);
+ #endif
+@@ -656,6 +657,9 @@ main (int argc, char **argv)
+       else if (strcmp ("-d", argv[i]) == 0 ||
+ 	       strcmp ("-debug", argv[i]) == 0)
+         debug_flag = 1;
++      else if (strcmp ("-v", argv[i]) == 0 ||
++	       strcmp ("-verbose", argv[i]) == 0)
++        verbose_flag = 1;
+       else if (strcmp ("-broken-server", argv[i]) == 0 ||
+ 	       strcmp ("-broken_server", argv[i]) == 0)
+         broken_server = 1;
